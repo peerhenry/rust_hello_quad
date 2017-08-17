@@ -46,9 +46,9 @@ impl Mesh{
         gl::STATIC_DRAW
       );
       
-      let pos_attrib = program.pos_attrib;
-      let normal_attrib = program.normal_attrib;
-      let uv_attrib = program.uv_attrib;
+      let pos_attrib = program.attribs.position;
+      let normal_attrib = program.attribs.normal;
+      let uv_attrib = program.attribs.uv;
       let stride = 8 * mem::size_of::<f32>() as GLsizei; // A vertex consists of 8 floats
 
       // vertex positions
