@@ -7,6 +7,10 @@ use std::path::Path;
 extern crate gl;
 use gl::types::*;
 extern crate image;
+extern crate cgmath;
+use cgmath::{ Matrix, Matrix4, One, PerspectiveFov, Point3, Vector3 };
+extern crate glutin;
+use glutin::Window;
 
 pub struct Attributes {
   pub position: GLuint,
@@ -15,17 +19,25 @@ pub struct Attributes {
 }
 
 pub struct Uniforms{
+  pub pvm: GLint,
   pub tex1: GLint
+}
+
+pub struct Matrices{
+  pub model: Matrix4<GLfloat>,
+  pub view: Matrix4<GLfloat>,
+  pub projection: Matrix4<GLfloat>
 }
 
 pub struct ShaderProgram {
     pub handle: GLuint,
     pub attribs: Attributes,
     pub uniforms: Uniforms,
+    pub matrices: Matrices
 }
 
 impl ShaderProgram {
-  pub fn new() -> ShaderProgram {
+  pub fn new(window: &Window) -> ShaderProgram {
 
     // Print version
     let version = unsafe {
@@ -47,7 +59,7 @@ impl ShaderProgram {
       // Check shader compilation status
       let mut result = mem::uninitialized();
       gl::GetShaderiv(v_shader, gl::COMPILE_STATUS, &mut result);
-      if(result == (gl::FALSE as i32))
+      if result == (gl::FALSE as i32)
       {
         println!("Vertex shader compilation failed!");
         let mut infolog: [GLchar; 200] = [0; 200];
@@ -60,7 +72,7 @@ impl ShaderProgram {
       }
 
       gl::GetShaderiv(f_shader, gl::COMPILE_STATUS, &mut result);
-      if(result == (gl::FALSE as i32))
+      if result == (gl::FALSE as i32)
       {
         println!("fragment shader compilation failed!");
         let mut infolog: [GLchar; 200] = [0; 200];
@@ -90,21 +102,65 @@ impl ShaderProgram {
       };
 
       // Get uniform handles
+      let pvm = gl::GetUniformLocation(handle, b"PVM\0".as_ptr() as *const _);
       let tloc = gl::GetUniformLocation(handle, b"Tex1\0".as_ptr() as *const _);
       let uniforms = Uniforms{
-        tex1: tloc
+        tex1: tloc,
+        pvm: pvm
       };
 
       // Check if handles were found
       if tloc < 0 {
         panic!("Uniform variable Tex1 not found!");
       }
+      if pvm < 0 {
+        panic!("Uniform variable PVM not found!");
+      }
+      
+      // Create PVM Matrices
+      let aspect = {
+        if let Some((width, height)) = window.get_inner_size_pixels() {
+          width as f32 / height as f32
+        } else {
+          4.0 / 3.0
+        }
+      };
+      println!("{:?}", aspect);
+      let projection = Matrix4::from(PerspectiveFov {
+        fovy: cgmath::Rad::from(cgmath::Deg(90.0)),
+        aspect: aspect,
+        near: 0.1,
+        far: 128.0,
+      });
+      let view = Matrix4::look_at(
+        Point3::new(0.5, 1.0, -3.0),  // camera location
+        Point3::new(0.0, 0.0, 0.0),   // target look at
+        Vector3::new(0.0, 1.0, 0.0)   // up direction
+      );
+      let mut matrices = Matrices{
+        model: Matrix4::one(),
+        view: view,
+        projection: projection
+      };
+
+      // Calculate PVM and send to OpenGL
+      let pvm_matrix = matrices.projection * matrices.view * matrices.model;
+      gl::UniformMatrix4fv(pvm, 1, gl::FALSE, pvm_matrix.as_ptr());
+
+      // Other opengl settings...
+      gl::FrontFace(gl::CW); // clockwise is front
+      gl::Enable(gl::CULL_FACE);  // enable back face culling
+      // Enable depth test
+      gl::Enable(gl::DEPTH_TEST);
+      // Accept fragment if it closer to the camera than the former one
+      gl::DepthFunc(gl::LESS);
 
       // Return a new ShaderProgram
       ShaderProgram {
         handle: handle,
         attribs: attribs,
         uniforms: uniforms,
+        matrices: matrices
       }
     }
   }
@@ -161,14 +217,14 @@ out vec2 TexCoord;
 //uniform mat4 ModelViewMatrix;
 //uniform mat3 NormalMatrix;
 //uniform mat4 Projection;
-//uniform mat4 MVP;
+uniform mat4 PVM;
 void main()
 {
   gl_PointSize = 100.0;
   TexCoord = VertexTexCoord;
   Normal = VertexNormal;
-  Position = VertexPosition;
-  gl_Position = vec4(VertexPosition, 1.0);
+  Position = vec3(PVM*vec4(VertexPosition, 1.0));
+  gl_Position = PVM*vec4(VertexPosition, 1.0);
 }
 \0";
 // normalize(NormalMatrix * VertexNormal);
