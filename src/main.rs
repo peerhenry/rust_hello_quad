@@ -5,12 +5,15 @@ use cgmath::{ Matrix, Matrix4, One, PerspectiveFov, Point3, Vector2, Vector3 };
 extern crate glutin;
 use glutin::{GlContext, ControlFlow, Event, WindowEvent, VirtualKeyCode, ElementState, KeyboardInput};
 use std::mem;
+mod camera;
 mod shader_program;
 use shader_program::ShaderProgram;
 mod mesh;
 use mesh::Mesh;
 mod glds;
 use glds::Vertex;
+mod w_event_handler;
+use w_event_handler::WindowEventHandler;
 
 fn main() {
   // Setup window
@@ -61,25 +64,18 @@ fn main() {
   //let ind = vec![0,1,2,3,1,2]; // DEBUG for face cull
   let mesh = Mesh::new(vert, ind, &shader_program);
 
+  let mut event_handler = WindowEventHandler::new(&mut shader_program, &gl_window);
+
   let mut running = true;
   while running {
     events_loop.poll_events(|event| {
       //println!("{:?}", event);
       match event {
-       Event::WindowEvent{ event, .. } => match event {
-          WindowEvent::Closed => running = false,
-          WindowEvent::Resized(w, h) => gl_window.resize(w, h),
-          WindowEvent::KeyboardInput  { input, .. }  => {
-            match input.state{
-              ElementState::Pressed => {
-                handle_pressed(input, &mut shader_program);
-              },
-              ElementState::Released => {
-                handle_released(input);
-              }
-            }
-          },
-          _ => ()
+        Event::WindowEvent{ event, .. } => {
+          match event {
+            WindowEvent::Closed => { running = false; },
+            _ => { event_handler.handle(event); }
+          }
         },
         _ => ()
       }
@@ -95,29 +91,3 @@ fn main() {
   }
 }
 
-fn handle_pressed(input: KeyboardInput, shader_program: &mut ShaderProgram){
-  if let Some(keycode) = input.virtual_keycode
-  {
-    //println!("keycode: {:?}", keycode);
-    match keycode {
-      VirtualKeyCode::W => {
-        shader_program.matrices.view = Matrix4::look_at(
-          Point3::new(0.5, 1.0, -2.0),  // camera location
-          Point3::new(0.0, 0.0, 0.0),   // target look at
-          Vector3::new(0.0, 1.0, 0.0)   // up direction
-        );
-        let pvm_matrix = shader_program.matrices.projection * shader_program.matrices.view * shader_program.matrices.model;
-        let pvm_handle = shader_program.uniforms.pvm;
-        unsafe{ gl::UniformMatrix4fv(pvm_handle, 1, gl::FALSE, pvm_matrix.as_ptr()); }
-      },
-      VirtualKeyCode::A => println!("left"),
-      VirtualKeyCode::S => println!("backward"),
-      VirtualKeyCode::D => println!("right"),
-      _ => ()
-    }
-  }
-}
-
-fn handle_released(input: KeyboardInput){
-
-}

@@ -1,8 +1,8 @@
+// GL Data structures
 extern crate gl;
 use gl::types::*;
 extern crate cgmath;
-use cgmath::Vector3;
-use cgmath::Vector2;
+use cgmath::{Vector3, Vector2, Matrix4};
 
 // with cgmath vectors
 pub struct Vertex{
@@ -19,4 +19,21 @@ impl Vertex {
             uv: Vector2::new(tc[0], tc[1]),
         }
     }
+}
+
+pub struct Attributes {
+  pub position: GLuint,
+  pub normal: GLuint,
+  pub uv: GLuint
+}
+
+pub struct Uniforms{
+  pub pvm: GLint,
+  pub tex1: GLint
+}
+
+pub struct Matrices{
+  pub model: Matrix4<GLfloat>,
+  pub view: Matrix4<GLfloat>,
+  pub projection: Matrix4<GLfloat>
 }

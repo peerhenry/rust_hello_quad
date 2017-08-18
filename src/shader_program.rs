@@ -8,32 +8,37 @@ extern crate gl;
 use gl::types::*;
 extern crate image;
 extern crate cgmath;
-use cgmath::{ Matrix, Matrix4, One, PerspectiveFov, Point3, Vector3 };
+use cgmath::{ Matrix, Matrix4, One, PerspectiveFov, Point3, Vector3};
 extern crate glutin;
 use glutin::Window;
 
-pub struct Attributes {
-  pub position: GLuint,
-  pub normal: GLuint,
-  pub uv: GLuint
-}
-
-pub struct Uniforms{
-  pub pvm: GLint,
-  pub tex1: GLint
-}
-
-pub struct Matrices{
-  pub model: Matrix4<GLfloat>,
-  pub view: Matrix4<GLfloat>,
-  pub projection: Matrix4<GLfloat>
-}
+use glds::{Attributes, Uniforms, Matrices};
+use camera::Camera;
 
 pub struct ShaderProgram {
     pub handle: GLuint,
     pub attribs: Attributes,
     pub uniforms: Uniforms,
-    pub matrices: Matrices
+    pub matrices: Matrices,
+    pub camera: Camera,
+}
+
+fn calculate_view(cam_location: Point3<GLfloat>, target: Point3<GLfloat>) -> Matrix4<GLfloat>
+{
+  Matrix4::look_at(
+    cam_location,            // camera location
+    target,                       // target look at
+    Vector3::new(0.0, 1.0, 0.0)   // up direction
+  )
+}
+
+fn calculate_projection(fovy: f32, ratio: f32, near: f32, far: f32) -> Matrix4<GLfloat> {
+  Matrix4::from(PerspectiveFov {
+    fovy: cgmath::Rad::from(cgmath::Deg(fovy)),
+    aspect: ratio,
+    near: near,
+    far: far
+  })
 }
 
 impl ShaderProgram {
@@ -46,6 +51,30 @@ impl ShaderProgram {
     };
     println!("OpenGL version {}", version);
 
+    // Create Camera
+    let camera = Camera::new(0.0, 0.0, Point3::new(0.0, 1.0, -3.0));
+
+    // Create PVM Matrices
+    let aspect = {
+      if let Some((width, height)) = window.get_inner_size_pixels() {
+        width as f32 / height as f32
+      } else {
+        4.0 / 3.0
+      }
+    };
+    let projection = calculate_projection(90.0, aspect, 0.1, 128.0);
+    let target = camera.location + camera.direction;
+    let view = calculate_view(camera.location, target);
+    let mut matrices = Matrices{
+      model: Matrix4::one(),
+      view: view,
+      projection: projection
+    };
+
+    // Calculate PVM
+    let pvm_matrix = matrices.projection * matrices.view * matrices.model;
+
+    // Do the unsafe OpenGL stuff
     unsafe {
       // Compile shader source code
       let v_shader = gl::CreateShader(gl::VERTEX_SHADER);
@@ -116,37 +145,6 @@ impl ShaderProgram {
       if pvm < 0 {
         panic!("Uniform variable PVM not found!");
       }
-      
-      // Create PVM Matrices
-      let aspect = {
-        if let Some((width, height)) = window.get_inner_size_pixels() {
-          width as f32 / height as f32
-        } else {
-          4.0 / 3.0
-        }
-      };
-      println!("{:?}", aspect);
-      let projection = Matrix4::from(PerspectiveFov {
-        fovy: cgmath::Rad::from(cgmath::Deg(90.0)),
-        aspect: aspect,
-        near: 0.1,
-        far: 128.0,
-      });
-      let view = Matrix4::look_at(
-        Point3::new(0.5, 1.0, -3.0),  // camera location
-        Point3::new(0.0, 0.0, 0.0),   // target look at
-        Vector3::new(0.0, 1.0, 0.0)   // up direction
-      );
-      let mut matrices = Matrices{
-        model: Matrix4::one(),
-        view: view,
-        projection: projection
-      };
-
-      // Calculate PVM and send to OpenGL
-      let pvm_matrix = matrices.projection * matrices.view * matrices.model;
-      gl::UniformMatrix4fv(pvm, 1, gl::FALSE, pvm_matrix.as_ptr());
-
       // Other opengl settings...
       gl::FrontFace(gl::CW); // clockwise is front
       gl::Enable(gl::CULL_FACE);  // enable back face culling
@@ -154,15 +152,62 @@ impl ShaderProgram {
       gl::Enable(gl::DEPTH_TEST);
       // Accept fragment if it closer to the camera than the former one
       gl::DepthFunc(gl::LESS);
+      
+      gl::UniformMatrix4fv(pvm, 1, gl::FALSE, pvm_matrix.as_ptr());
 
       // Return a new ShaderProgram
       ShaderProgram {
         handle: handle,
         attribs: attribs,
         uniforms: uniforms,
-        matrices: matrices
+        matrices: matrices,
+        camera: camera
       }
     }
+  }
+
+  pub fn set_new_aspect(&self, ratio: f32){
+    let projection = calculate_projection(90.0, ratio, 0.1, 128.0);
+    self.update_pvm();
+  }
+
+  // Increment view angles and update view
+  pub fn incr_view_angles(&mut self, dtheta: f64, dphi: f64)
+  {
+    let new_theta = self.camera.theta + dtheta;
+    let new_phi = self.camera.phi + dphi;
+    self.camera.set_orientation(new_theta, new_phi);
+    self.update_view();
+  }
+
+  // Move cam location forward and update view
+  pub fn move_cam_forward(&mut self, ds: f64)
+  {
+    let dz: GLfloat = (self.camera.theta.cos()*ds) as GLfloat;
+    let dx: GLfloat = (-self.camera.theta.sin()*ds) as GLfloat;
+    let new_cam_loc = Point3::new(self.camera.location.x + dx , self.camera.location.y, self.camera.location.z + dz);
+    self.camera.location = new_cam_loc;
+    self.update_view();
+  }
+
+
+
+  // [REGION] uniform calculation and setting
+
+    // Calculate PVM and send to OpenGL
+  fn update_pvm(&self)
+  {
+    let pvm_handle = self.uniforms.pvm;
+    let pvm_matrix = self.matrices.projection * self.matrices.view * self.matrices.model;
+    unsafe{ gl::UniformMatrix4fv(pvm_handle, 1, gl::FALSE, pvm_matrix.as_ptr()); }
+  }
+
+  // Calculates new view matrix, stores it, and updates PVM
+  fn update_view(&mut self){
+    let target = self.camera.location + self.camera.direction;
+    let new_view = calculate_view(self.camera.location, target);
+    self.matrices.view = new_view;
+    self.update_pvm();
   }
 
   pub fn load_texture(&self, rel_path: String){
