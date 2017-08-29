@@ -1,24 +1,30 @@
+// std
 use std::ptr;
 use std::process;
 use std::ffi::CStr;
 use std::mem;
 use std::str;
 use std::path::Path;
+use std::rc::Rc;
+// external crates
 extern crate gl;
 use gl::types::*;
 extern crate image;
 extern crate cgmath;
-use cgmath::{ Matrix, Matrix4, One, PerspectiveFov, Point3, Vector3};
+use cgmath::{ Matrix, SquareMatrix, Matrix3, Matrix4, One, PerspectiveFov, Point3, Vector3};
 extern crate glutin;
 use glutin::Window;
+// custom external crates
+extern crate uniforms;
+use uniforms::uniform::{Uniform, UniformObserver, GlSendBehavior};
+use uniforms::gl_sender::GlSender;
 
-use glds::{Attributes, Uniforms, Matrices};
+// internal modules
+use glds::{AttributeHandles, UniformHandles, ProgramHandles, Matrices};
 use camera::Camera;
 
 pub struct ShaderProgram {
-    pub handle: GLuint,
-    pub attribs: Attributes,
-    pub uniforms: Uniforms,
+    pub handles: ProgramHandles,
     pub matrices: Matrices,
     pub camera: Camera,
 }
@@ -39,6 +45,10 @@ fn calculate_projection(fovy: f32, ratio: f32, near: f32, far: f32) -> Matrix4<G
     near: near,
     far: far
   })
+}
+
+fn truncate_mat4(mat4: Matrix4<GLfloat>) -> Matrix3<GLfloat>{
+  Matrix3::from_cols(mat4.x.truncate(), mat4.y.truncate(), mat4.z.truncate())
 }
 
 impl ShaderProgram {
@@ -124,25 +134,28 @@ impl ShaderProgram {
       let pos_attrib = gl::GetAttribLocation(handle, b"VertexPosition\0".as_ptr() as *const _) as GLuint;
       let normal_attrib = gl::GetAttribLocation(handle, b"VertexNormal\0".as_ptr() as *const _) as GLuint;
       let uv_attrib = gl::GetAttribLocation(handle, b"VertexTexCoord\0".as_ptr() as *const _) as GLuint;
-      let attribs = Attributes{
+      let attribs = AttributeHandles{
         position: pos_attrib,
         normal: normal_attrib,
         uv: uv_attrib,
       };
 
       // Get uniform handles
-      let pvm = gl::GetUniformLocation(handle, b"PVM\0".as_ptr() as *const _);
+      let pvm_handle = gl::GetUniformLocation(handle, b"PVM\0".as_ptr() as *const _);
+      let projection_handle = gl::GetUniformLocation(handle, b"Projection\0".as_ptr() as *const _);
+      let view_model_handle = gl::GetUniformLocation(handle, b"ViewModel\0".as_ptr() as *const _);
+      let normal_matrix_handle = gl::GetUniformLocation(handle, b"NormalMatrix\0".as_ptr() as *const _);
       let tloc = gl::GetUniformLocation(handle, b"Tex1\0".as_ptr() as *const _);
-      let uniforms = Uniforms{
+      let uniform_handles = UniformHandles{
         tex1: tloc,
-        pvm: pvm
+        pvm: pvm_handle
       };
 
       // Check if handles were found
       if tloc < 0 {
         panic!("Uniform variable Tex1 not found!");
       }
-      if pvm < 0 {
+      if pvm_handle < 0 {
         panic!("Uniform variable PVM not found!");
       }
       // Other opengl settings...
@@ -153,13 +166,85 @@ impl ShaderProgram {
       // Accept fragment if it closer to the camera than the former one
       gl::DepthFunc(gl::LESS);
       
-      gl::UniformMatrix4fv(pvm, 1, gl::FALSE, pvm_matrix.as_ptr());
+      // -- Create Uniforms --
+
+      // todo: 
+      // finish this function
+      // then make it generic
+      // then use it for all the uniforms
+      // then write shader with the uniforms
+      fn create_uniform<T>(val: T, handle: GLint, observers: Vec<Rc<UniformObserver>>, calculation: Box<Fn()->T>, send_behavior: Option<Box<GlSendBehavior<T>>>) -> Rc<Uniform<T>> where T: Copy {
+        let u = Uniform::new(val, observers, calculation, send_behavior);
+        Rc::new(u)
+      }
+
+      fn create_mat3_uniform(handle: GLint, observers: Vec<Rc<UniformObserver>>) -> Rc<Uniform<Matrix3<GLfloat>>> {
+        let gl_sender = GlSender::<Matrix3<GLfloat>>::new(handle);
+        let boxed_sender = Box::new(gl_sender) as Box<GlSendBehavior<Matrix3<GLfloat>>>;
+        let wrapped_sender = Some(boxed_sender);
+        create_uniform::<Matrix3<GLfloat>>( Matrix3::from_value(1.0), handle, observers, Box::new(|| Matrix3::from_value(1.0)), wrapped_sender )
+      }
+
+      fn create_mat4_uniform(handle: GLint, observers: Vec<Rc<UniformObserver>>) -> Rc<Uniform<Matrix4<GLfloat>>> {
+        let gl_sender = GlSender::<Matrix4<GLfloat>>::new(handle);
+        let boxed_sender = Box::new(gl_sender) as Box<GlSendBehavior<Matrix4<GLfloat>>>;
+        let wrapped_sender = Some(boxed_sender);
+        create_uniform::<Matrix4<GLfloat>>( Matrix4::from_value(1.0), handle, observers, Box::new(|| Matrix4::from_value(1.0)), wrapped_sender )
+      }
+
+      fn create_partial_uniform<T>(val: T, observers: Vec<Rc<UniformObserver>>, calculation: Box<Fn()->T>) -> Rc<Uniform<T>> where T: Copy {
+        let u = Uniform::new(val, observers, calculation, None);
+        Rc::new(u)
+      }
+
+      fn create_mat4_partial_uniform(observers: Vec<Rc<UniformObserver>>) -> Rc<Uniform<Matrix4<GLfloat>>> {
+        create_partial_uniform::<Matrix4<GLfloat>>( Matrix4::from_value(1.0), observers, Box::new(|| Matrix4::from_value(1.0)) )
+      }
+
+      // uniforms
+      let u_pvm = create_mat4_uniform(pvm_handle, vec![]);
+      let u_normal_matrix = create_mat3_uniform(normal_matrix_handle, vec![]);
+      let u_view_model = {
+        let observer1 = u_pvm.clone() as Rc<UniformObserver>;
+        let observer2 = u_normal_matrix.clone() as Rc<UniformObserver>;
+        create_mat4_uniform(view_model_handle, vec![observer1, observer2])
+      };
+      let u_projection = create_mat4_uniform(projection_handle, vec![u_pvm.clone()]);
+      // partial uniforms
+      let u_view = create_mat4_partial_uniform(vec![u_view_model.clone()]);
+      let u_model = create_mat4_partial_uniform(vec![u_view_model.clone()]);
+
+      // -- Set Calculations --
+
+      // set VM calculation
+      {
+        let c_view = u_projection.clone();
+        let c_model = u_view_model.clone();
+        u_pvm.set_calculation(Box::new(move || c_view.value.get() * c_model.value.get()));
+      };
+
+      // Set NormalMatrix calculation
+      {
+        let u_view_model = u_view_model.clone();
+        u_normal_matrix.set_calculation(Box::new( move || truncate_mat4(u_view_model.value.get()) ));
+      };
+
+      { // set PVM calculation
+        let c_projection = u_projection.clone();
+        let u_view_model = u_view_model.clone();
+        u_pvm.set_calculation(Box::new( move || c_projection.value.get() * u_view_model.value.get() ));
+      };
+
+      // -- Send Uniforms --
+      //gl::UniformMatrix4fv(pvm, 1, gl::FALSE, pvm_matrix.as_ptr());
 
       // Return a new ShaderProgram
       ShaderProgram {
-        handle: handle,
-        attribs: attribs,
-        uniforms: uniforms,
+        handles: ProgramHandles{
+          program: handle as GLint,
+          attributes: attribs,
+          uniforms: uniform_handles,
+        },
         matrices: matrices,
         camera: camera
       }
@@ -181,10 +266,12 @@ impl ShaderProgram {
   }
 
   // Move cam location forward and update view
-  pub fn move_cam_forward(&mut self, ds: f64)
+  pub fn move_camera(&mut self, d_par: f64, d_orth: f64)
   {
-    let dz: GLfloat = (self.camera.theta.cos()*ds) as GLfloat;
-    let dx: GLfloat = (-self.camera.theta.sin()*ds) as GLfloat;
+    let sin_theta = self.camera.theta.sin();
+    let cos_theta = self.camera.theta.cos();
+    let dz: GLfloat = (cos_theta*d_par + sin_theta*d_orth) as GLfloat;
+    let dx: GLfloat = (-sin_theta*d_par + cos_theta*d_orth) as GLfloat;
     let new_cam_loc = Point3::new(self.camera.location.x + dx , self.camera.location.y, self.camera.location.z + dz);
     self.camera.location = new_cam_loc;
     self.update_view();
@@ -197,7 +284,7 @@ impl ShaderProgram {
     // Calculate PVM and send to OpenGL
   fn update_pvm(&self)
   {
-    let pvm_handle = self.uniforms.pvm;
+    let pvm_handle = self.handles.uniforms.pvm;
     let pvm_matrix = self.matrices.projection * self.matrices.view * self.matrices.model;
     unsafe{ gl::UniformMatrix4fv(pvm_handle, 1, gl::FALSE, pvm_matrix.as_ptr()); }
   }
@@ -242,7 +329,7 @@ impl ShaderProgram {
       gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
       gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
       // Set tex1 sampler uniform to refer to texture unit 0
-      gl::Uniform1i(self.uniforms.tex1, 0);
+      gl::Uniform1i(self.handles.uniforms.tex1, 0);
     }
   }
 }
@@ -259,9 +346,9 @@ out vec3 Position;
 out vec3 Normal;
 out vec2 TexCoord;
 
-//uniform mat4 ModelViewMatrix;
-//uniform mat3 NormalMatrix;
-//uniform mat4 Projection;
+uniform mat4 ViewModelMatrix;
+uniform mat3 NormalMatrix;
+uniform mat4 Projection;
 uniform mat4 PVM;
 void main()
 {

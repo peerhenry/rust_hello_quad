@@ -21,15 +21,21 @@ impl Vertex {
     }
 }
 
-pub struct Attributes {
+pub struct AttributeHandles {
   pub position: GLuint,
   pub normal: GLuint,
   pub uv: GLuint
 }
 
-pub struct Uniforms{
+pub struct UniformHandles {
   pub pvm: GLint,
   pub tex1: GLint
+}
+
+pub struct ProgramHandles {
+  pub program: GLint,
+  pub attributes: AttributeHandles,
+  pub uniforms: UniformHandles,
 }
 
 pub struct Matrices{

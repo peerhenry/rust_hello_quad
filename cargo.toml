@@ -9,3 +9,4 @@ cgmath = "0.15.0"
 gl = "*"
 glutin = "0.9.2"
 image = "*"
+uniforms = { git = "https://github.com/peerhenry/solid_uniforms" }

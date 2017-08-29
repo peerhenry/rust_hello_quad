@@ -1,7 +1,7 @@
 extern crate gl;
 use gl::types::*;
 extern crate cgmath;
-use cgmath::{ Matrix, Matrix4, One, PerspectiveFov, Point3, Vector2, Vector3 };
+use cgmath::{ Matrix, SquareMatrix, Matrix3, Matrix4, One, PerspectiveFov, Point3, Vector2, Vector3, Vector4 };
 extern crate glutin;
 use glutin::{GlContext, ControlFlow, Event, WindowEvent, VirtualKeyCode, ElementState, KeyboardInput};
 use std::mem;
@@ -14,7 +14,20 @@ mod glds;
 use glds::Vertex;
 mod w_event_handler;
 use w_event_handler::WindowEventHandler;
+extern crate uniforms;
 
+// #[test] // this is how to cast matrices
+// fn matrix_cast(){
+//   let mat4: Matrix4<f32> = Matrix4::from_diagonal(Vector4::new(1.0,2.0,3.0,4.0));
+//   //let mat3 = mat4 as Matrix3<f32>;
+//   //let mat3: Matrix3<f32> = mat4.cast();
+//   let mat3 = Matrix3::from_cols(mat4.x.truncate(), mat4.y.truncate(), mat4.z.truncate()); // the other way around would use extend(z)
+//   println!("mat4: {:?}", mat4);
+//   println!("mat3: {:?}", mat3);
+//   assert_eq!(mat4.y.y, mat3.y.y);
+// }
+
+#[cfg(not(test))]
 fn main() {
   // Setup window
   let mut events_loop = glutin::EventsLoop::new();
@@ -62,7 +75,7 @@ fn main() {
   let ind = vec![3,1,2,2,1,0];
   //let ind = vec![0,1,2,2,1,3];
   //let ind = vec![0,1,2,3,1,2]; // DEBUG for face cull
-  let mesh = Mesh::new(vert, ind, &shader_program);
+  let mesh = Mesh::new(vert, ind, &shader_program.handles.attributes);
 
   let mut event_handler = WindowEventHandler::new(&mut shader_program, &gl_window);
 
@@ -81,6 +94,8 @@ fn main() {
       }
     });
 
+    if event_handler.quit {running = false;}
+
     unsafe{
       gl::Clear(gl::DEPTH_BUFFER_BIT);
       gl::Clear(gl::COLOR_BUFFER_BIT);
@@ -90,4 +105,3 @@ fn main() {
     gl_window.swap_buffers().unwrap();
   }
 }
-

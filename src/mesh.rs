@@ -2,7 +2,7 @@ extern crate gl;
 use gl::types::*;
 use std::ptr;
 use std::mem;
-use glds::Vertex;
+use glds::{Vertex, AttributeHandles};
 use shader_program::ShaderProgram;
 
 pub struct Mesh{
@@ -14,7 +14,8 @@ pub struct Mesh{
 }
 
 impl Mesh{
-  pub fn new(vertices: Vec<Vertex>, indices: Vec<GLuint>, program: &ShaderProgram)->Mesh{
+  // todo: give it the model uniform
+  pub fn new(vertices: Vec<Vertex>, indices: Vec<GLuint>, attribute_handles: &AttributeHandles)->Mesh{
 
     unsafe{
       let mut vao = mem::uninitialized();
@@ -46,9 +47,9 @@ impl Mesh{
         gl::STATIC_DRAW
       );
       
-      let pos_attrib = program.attribs.position;
-      let normal_attrib = program.attribs.normal;
-      let uv_attrib = program.attribs.uv;
+      let pos_attrib = attribute_handles.position;
+      let normal_attrib = attribute_handles.normal;
+      let uv_attrib = attribute_handles.uv;
       let stride = 8 * mem::size_of::<f32>() as GLsizei; // A vertex consists of 8 floats
 
       // vertex positions
