@@ -15,6 +15,7 @@ use glds::Vertex;
 mod w_event_handler;
 use w_event_handler::WindowEventHandler;
 extern crate uniforms;
+mod shader_code;
 
 // #[test] // this is how to cast matrices
 // fn matrix_cast(){
